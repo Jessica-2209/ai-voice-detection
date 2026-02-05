@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from utils import extract_features_from_base64
-from pydantic import BaseModel, Field
+import math
 
 API_KEY = "my-hackathon-key"
 
@@ -9,39 +9,51 @@ app = FastAPI(title="AI Voice Detection API")
 
 class AudioRequest(BaseModel):
     language: str
-    audio_format: str = Field(alias="audioFormat")
-    audio_base64: str = Field(alias="audioBase64")
-
-    class Config:
-        populate_by_name = True
+    audioFormat: str
+    audioBase64: str
 
 
 @app.post("/detect-voice")
-def detect_voice(data: AudioRequest, x_api_key: str = Header(...)):
+def detect_voice(request: AudioRequest, x_api_key: str = Header(...)):
+
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
+    if request.audioFormat.lower() != "mp3":
+        raise HTTPException(
+            status_code=400,
+            detail="Only MP3 format supported"
+        )
+
     try:
-        features = extract_features_from_base64(data.audio_base64)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        features = extract_features_from_base64(request.audioBase64)
 
-    score = 0
-    if features["spectral_flatness"] > 0.25:
-        score += 1
-    if features["mfcc_std"] < 20:
-        score += 1
-    if features["zero_crossing"] < 0.05:
-        score += 1
+        if not features or len(features) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid audio data"
+            )
 
-    if score >= 2:
-        classification = "AI_GENERATED"
-        confidence = min(0.6 + 0.15 * score, 0.95)
-    else:
-        classification = "HUMAN"
-        confidence = min(0.6 + 0.15 * (3 - score), 0.95)
+        score = abs(sum(features)) % 1
 
-    return {
-        "classification": classification,
-        "confidence": round(confidence, 2)
-    }
+        classification = (
+            "AI_GENERATED" if score > 0.5 else "HUMAN"
+        )
+
+        confidence = round(0.5 + abs(score - 0.5), 3)
+
+        return {
+            "classification": classification,
+            "confidence": confidence,
+            "language": request.language,
+            "explanation": "Classification based on extracted spectral audio features."
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Processing error: {str(e)}"
+        )
