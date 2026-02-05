@@ -1,13 +1,18 @@
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from utils import extract_features_from_base64
+from pydantic import BaseModel, Field
 
 API_KEY = "my-hackathon-key"
 
 app = FastAPI(title="AI Voice Detection API")
 
 class AudioRequest(BaseModel):
-    audio_base64: str
+    audio_base64: str = Field(alias="audioBase64")
+
+    class Config:
+        populate_by_name = True
+
 
 @app.post("/detect-voice")
 def detect_voice(data: AudioRequest, x_api_key: str = Header(...)):
