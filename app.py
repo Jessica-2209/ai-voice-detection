@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from utils import extract_features_from_base64
 
 API_KEY = "my-hackathon-key"
@@ -7,46 +7,50 @@ API_KEY = "my-hackathon-key"
 app = FastAPI(title="AI Voice Detection API")
 
 
+# ✅ GUVI request format
 class AudioRequest(BaseModel):
-    audio_base64: str = Field(alias="audioBase64")
-
-    class Config:
-        populate_by_name = True
+    language: str
+    audioFormat: str
+    audioBase64: str
 
 
 @app.post("/detect-voice")
-async def detect_voice(
-    request: AudioRequest,
-    x_api_key: str = Header(...)
-):
+def detect_voice(request: AudioRequest, x_api_key: str = Header(...)):
 
+    # 🔐 Authentication
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
+    # ✅ Format check
+    if request.audioFormat.lower() != "mp3":
+        raise HTTPException(status_code=400, detail="Only MP3 supported")
+
     try:
-        features = extract_features_from_base64(request.audio_base64)
+        features = extract_features_from_base64(request.audioBase64)
 
-        # Convert dict values to numbers safely
-        numeric_values = []
+        # Extract key features safely
+        flatness = float(features.get("spectral_flatness", 0))
+        mfcc_std = float(features.get("mfcc_std", 1))
+        zero_cross = float(features.get("zero_crossing", 0))
 
-        for value in features.values():
-            if isinstance(value, (int, float)):
-                numeric_values.append(value)
-            elif isinstance(value, list):
-                numeric_values.extend(
-                    [v for v in value if isinstance(v, (int, float))]
-                )
+        # ---- Stable classifier logic ----
+        # AI voices = smoother + less variation
+        ai_score = (
+            (flatness * 0.5) +
+            (1 / (mfcc_std + 1) * 0.3) +
+            ((0.1 - zero_cross) * 2 * 0.2)
+        )
 
-        if not numeric_values:
-            score = 0.5
-        else:
-            score = abs(sum(numeric_values)) % 1
+        # Clamp score
+        ai_score = max(0.0, min(ai_score, 1.0))
 
-        label = "AI_GENERATED" if score > 0.5 else "HUMAN"
+        label = "AI_GENERATED" if ai_score > 0.55 else "HUMAN"
+
+        confidence = round(0.5 + abs(ai_score - 0.5), 3)
 
         return {
             "classification": label,
-            "confidence": round(score, 3)
+            "confidence": confidence
         }
 
     except Exception as e:
