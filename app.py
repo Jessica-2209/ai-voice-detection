@@ -8,6 +8,8 @@ API_KEY = "my-hackathon-key"
 app = FastAPI(title="AI Voice Detection API")
 
 class AudioRequest(BaseModel):
+    language: str
+    audio_format: str = Field(alias="audioFormat")
     audio_base64: str = Field(alias="audioBase64")
 
     class Config:
